@@ -1,0 +1,3 @@
+[submodule "UPaintStandalone/Packages/com.unity-x.unityengine-x"]
+	path = UPaintStandalone/Packages/com.unity-x.unityengine-x
+	url = https://github.com/Unity-X/UnityEngine-X.git
