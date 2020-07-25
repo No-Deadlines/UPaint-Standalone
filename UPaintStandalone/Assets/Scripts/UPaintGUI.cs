@@ -28,14 +28,14 @@ public class UPaintGUI : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
     private bool _brushPressed;
     private List<UPaintLayerGUI> _layers = new List<UPaintLayerGUI>();
 
+    private UPaintLayerGUI CurrentLayer => CurrentLayerIndex >= 0 && CurrentLayerIndex < _layers.Count ? _layers[CurrentLayerIndex] : null;
+
     public Vector2Int Resolution => _resolution;
     public IUPaintBrush CurrentBrush { get; private set; }
     public Color PaintColor { get => _paintColor; set => _paintColor = value; }
     public FilterMode TextureFiltering => _textureFiltering;
     public int HistoryCapacity => _historicCapacity;
-
     public int CurrentLayerIndex { get; set; }
-    public UPaintLayerGUI CurrentLayer => CurrentLayerIndex >= 0 && CurrentLayerIndex < _layers.Count ? _layers[CurrentLayerIndex] : null;
     public int LayerCount => _layers.Count;
 
     public void AddLayer()
@@ -72,8 +72,13 @@ public class UPaintGUI : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
         Destroy(_layers[index].gameObject);
         _layers.RemoveAt(index);
 
-        if (CurrentLayerIndex == _layers.Count || CurrentLayerIndex == index)
+        if (CurrentLayerIndex >= index)
+        {
             CurrentLayerIndex--;
+        }
+
+        if (CurrentLayerIndex < 0)
+            CurrentLayerIndex = 0;
     }
 
     public void MoveLayerUp(int index)
@@ -125,10 +130,16 @@ public class UPaintGUI : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
     }
 
     /// <summary>
-    /// This will clear the canvas
+    /// This will clear the canvases
     /// </summary>
     public void Initialize(Vector2Int renderResolution, FilterMode textureFiltering, int historyCapacity)
     {
+        // remove all existing layers
+        while (_layers.Count > 1)
+        {
+            RemoveLayer(_layers.Count - 1);
+        }
+
         for (int i = 0; i < _layers.Count; i++)
         {
             _layers[i].Initialize(renderResolution, textureFiltering, historyCapacity);
@@ -136,9 +147,11 @@ public class UPaintGUI : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
         _resolution = renderResolution;
         _textureFiltering = textureFiltering;
         _historicCapacity = historyCapacity;
+
+        CurrentLayerIndex = 0;
     }
 
-    public void SetFillBrush(int extrusionCount = 1)
+    public void SetFillBrush(int extrusionCount = 0)
     {
         FillBrush.ExtrusionCount = extrusionCount;
         CurrentBrush = FillBrush;
@@ -196,34 +209,54 @@ public class UPaintGUI : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
         CurrentLayer?.Undo();
     }
 
+    /// <summary>
+    /// Export all visible layers to PNG data
+    /// </summary>
     public byte[] ExportToPNG()
     {
-        var texture = new Texture2D(_resolution.x, _resolution.y, TextureFormat.RGBA32, mipChain: false);
-        texture.filterMode = _textureFiltering;
-        texture.wrapMode = TextureWrapMode.Clamp;
+        UPaintLayer[] layers = _layers.Where(l => l.gameObject.activeSelf).Select(l => l.Layer).ToArray();
 
-        UPaintCanvas[] canvases = _layers.Where(l => l.gameObject.activeSelf).Select(l => l.Canvas).ToArray();
-
-        UPaintCanvas.MergeCanvases(texture, canvases).Complete();
-
-        byte[] result = texture.EncodeToPNG();
-
-        Destroy(texture);
-
-        return result;
+        return ExportToPNGInternal(layers);
     }
 
-    public void ImportFromImage(byte[] imageData)
+    /// <summary>
+    /// Export layers to PNG data
+    /// </summary>
+    public byte[] ExportToPNG(params int[] layerIndexes)
     {
-        while (LayerCount > 1)
+        List<UPaintLayer> layers = new List<UPaintLayer>(layerIndexes.Length);
+        for (int i = 0; i < _layers.Count; i++)
         {
-            RemoveLayer(LayerCount - 1);
+            if (layerIndexes.Contains(i))
+            {
+                layers.Add(_layers[i].Layer);
+            }
         }
 
-        if (LayerCount == 0)
-            AddLayer();
+        return ExportToPNGInternal(layers.ToArray());
+    }
 
-        _layers[0].Initialize(imageData, _textureFiltering, _historicCapacity);
+    public void ImportImage(Texture2D texture)
+    {
+        if(_layers.Count == 1 && _layers[0].IsEmptyEmpty)
+        {
+            Initialize(new Vector2Int(texture.width, texture.height), _textureFiltering, _historicCapacity);
+        }
+        else
+        {
+            AddLayer();
+            CurrentLayerIndex = _layers.Count - 1;
+        }
+
+        ImportImage(texture, CurrentLayerIndex);
+    }
+
+    public void ImportImage(Texture2D texture, int layerIndex)
+    {
+        if (layerIndex < 0 || layerIndex >= _layers.Count)
+            return;
+
+        _layers[layerIndex].Initialize(texture, _textureFiltering, _historicCapacity);
     }
 
     private void Awake()
@@ -241,12 +274,12 @@ public class UPaintGUI : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
 
         if (CurrentBrush != null && _pointerIn)
         {
-            if (Input.GetMouseButtonDown(0))
+            if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1))
             {
                 if (CurrentLayer != null)
                 {
                     float2 pixelCoordinate = DisplayPositionToLayerCoordinate(Input.mousePosition);
-                    CurrentLayer.PressBursh(CurrentBrush, pixelCoordinate, PaintColor);
+                    CurrentLayer.PressBursh(CurrentBrush, pixelCoordinate, PaintColor, Input.GetMouseButtonDown(0) ? MouseButton.Left : MouseButton.Right);
                 }
                 _brushPressed = true;
             }
@@ -255,23 +288,23 @@ public class UPaintGUI : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
         if (_brushPressed)
         {
             // pointer hold
-            if (Input.GetMouseButton(0))
+            if (Input.GetMouseButton(0) || Input.GetMouseButton(1))
             {
                 if (CurrentLayer != null)
                 {
                     float2 pixelCoordinate = DisplayPositionToLayerCoordinate(Input.mousePosition);
-                    CurrentLayer.HoldBursh(CurrentBrush, pixelCoordinate, PaintColor);
+                    CurrentLayer.HoldBursh(CurrentBrush, pixelCoordinate, PaintColor, Input.GetMouseButton(0) ? MouseButton.Left : MouseButton.Right);
                 }
             }
 
             // pointer up
-            if (Input.GetMouseButtonUp(0))
+            if (Input.GetMouseButtonUp(0) || Input.GetMouseButtonUp(1))
             {
                 if (CurrentLayer != null)
                 {
                     float2 pixelCoordinate = DisplayPositionToLayerCoordinate(Input.mousePosition);
 
-                    CurrentLayer.ReleaseBursh(CurrentBrush, pixelCoordinate, PaintColor);
+                    CurrentLayer.ReleaseBursh(CurrentBrush, pixelCoordinate, PaintColor, Input.GetMouseButtonUp(0) ? MouseButton.Left : MouseButton.Right);
                 }
                 _brushPressed = false;
             }
@@ -302,6 +335,21 @@ public class UPaintGUI : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
         }
         FillBrush?.Dispose();
         MoveBrush?.Dispose();
+    }
+
+    private byte[] ExportToPNGInternal(UPaintLayer[] layers)
+    {
+        var texture = new Texture2D(_resolution.x, _resolution.y, TextureFormat.RGBA32, mipChain: false);
+        texture.filterMode = _textureFiltering;
+        texture.wrapMode = TextureWrapMode.Clamp;
+
+        UPaintLayer.MergeLayers(texture, layers).Complete();
+
+        byte[] result = texture.EncodeToPNG();
+
+        Destroy(texture);
+
+        return result;
     }
 
     public void OnPointerDown(PointerEventData eventData)

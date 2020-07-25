@@ -3,6 +3,11 @@ using UnityEngine.UI;
 using CCC.UPaint;
 using Unity.Mathematics;
 using System.Linq.Expressions;
+using System;
+using Unity.Collections;
+using UnityEngineX;
+using Unity.Jobs;
+using Unity.Burst;
 
 public class UPaintLayerGUI : MonoBehaviour
 {
@@ -14,58 +19,63 @@ public class UPaintLayerGUI : MonoBehaviour
     private RawImage _previewRenderImage;
     private Texture2D _mainRenderTexture;
     private Texture2D _previewRenderTexture;
-    private UPaintCanvas _canvas;
-    private bool _resetCanvasOnUpdate;
-    private byte[] _dataToUseOnReset;
+    private UPaintLayer _layer;
+    private bool _resetLayerOnUpdate;
+    private Texture2D _initTexture;
+    private bool _resetResolution;
 
     public Vector2Int Resolution => _resolution;
     public FilterMode TextureFiltering => _textureFiltering;
     public int HistoryCapacity => _historicCapacity;
     public Texture2D RenderTexture => _mainRenderTexture;
-    public UPaintCanvas Canvas => _canvas;
+    public UPaintLayer Layer => _layer;
+    public bool IsEmptyEmpty { get; private set; } = true;
 
     /// <summary>
-    /// This will clear the canvas
+    /// This will clear the layer
     /// </summary>
     public void Initialize(Vector2Int renderResolution, FilterMode textureFiltering, int historyCapacity)
     {
-        _dataToUseOnReset = null;
+        _initTexture = null;
         _resolution = renderResolution;
         _textureFiltering = textureFiltering;
         _historicCapacity = historyCapacity;
 
-        _resetCanvasOnUpdate = true;
+        _resetResolution = true;
+        _resetLayerOnUpdate = true;
     }
     /// <summary>
-    /// This will clear the canvas
+    /// This will clear the layer
     /// </summary>
-    public void Initialize(byte[] imageData, FilterMode textureFiltering, int historyCapacity)
+    public void Initialize(Texture2D imageData, FilterMode textureFiltering, int historyCapacity)
     {
-        _dataToUseOnReset = imageData;
+        _initTexture = imageData;
         _textureFiltering = textureFiltering;
         _historicCapacity = historyCapacity;
 
-        _resetCanvasOnUpdate = true;
+        _resetLayerOnUpdate = true;
     }
 
     public bool CanRedo()
     {
-        return _canvas != null && _canvas.AvailableRedos > 0;
+        return _layer != null && _layer.AvailableRedos > 0;
     }
 
     public void Redo()
     {
-        _canvas?.Redo();
+        IsEmptyEmpty = false;
+        _layer?.Redo();
     }
 
     public bool CanUndo()
     {
-        return _canvas != null && _canvas.AvailableUndos > 0;
+        return _layer != null && _layer.AvailableUndos > 0;
     }
 
     public void Undo()
     {
-        _canvas?.Undo();
+        IsEmptyEmpty = false;
+        _layer?.Undo();
     }
 
     private void Awake()
@@ -99,68 +109,79 @@ public class UPaintLayerGUI : MonoBehaviour
         _previewRenderImage = SpawnRawImage("Preview Render Image (generated)");
         _previewRenderImage.texture = _previewRenderTexture;
 
-        _resetCanvasOnUpdate = true;
+        _resetLayerOnUpdate = true;
     }
 
-    public void PressBursh<T>(T brush, float2 pixelCoordinate, Color color) where T : IUPaintBrush
+    public void PressBursh<T>(T brush, float2 pixelCoordinate, Color color, MouseButton mouseButton) where T : IUPaintBrush
     {
-        _canvas?.PressBursh(brush, pixelCoordinate, color);
+        IsEmptyEmpty = false;
+        _layer?.PressBursh(brush, pixelCoordinate, color, mouseButton);
     }
-    public void HoldBursh<T>(T brush, float2 pixelCoordinate, Color color) where T : IUPaintBrush
+    public void HoldBursh<T>(T brush, float2 pixelCoordinate, Color color, MouseButton mouseButton) where T : IUPaintBrush
     {
-        _canvas?.HoldBursh(brush, pixelCoordinate, color);
+        IsEmptyEmpty = false;
+        _layer?.HoldBursh(brush, pixelCoordinate, color, mouseButton);
     }
-    public void ReleaseBursh<T>(T brush, float2 pixelCoordinate, Color color) where T : IUPaintBrush
+    public void ReleaseBursh<T>(T brush, float2 pixelCoordinate, Color color, MouseButton mouseButton) where T : IUPaintBrush
     {
-        _canvas?.ReleaseBursh(brush, pixelCoordinate, color);
+        IsEmptyEmpty = false;
+        _layer?.ReleaseBursh(brush, pixelCoordinate, color, mouseButton);
     }
 
-    public void ApplyChangesIfPossible() => _canvas?.ApplyChangesIfPossible();
+    public void ApplyChangesIfPossible() => _layer?.ApplyChangesIfPossible();
 
     void Update()
     {
-        if (_resetCanvasOnUpdate)
+        if (_resetLayerOnUpdate)
         {
-            _resetCanvasOnUpdate = false;
-            ResetCanvas();
+            _resetLayerOnUpdate = false;
+            ResetLayer();
         }
     }
 
-    private void ResetCanvas()
+    private void ResetLayer()
     {
-        _canvas?.Dispose();
+        _layer?.Dispose();
 
         Color? initColor;
 
-        if (_dataToUseOnReset != null)
+        if (_resetResolution)
         {
-            _mainRenderTexture.LoadImage(_dataToUseOnReset);
-            var tex = new Texture2D(1, 1, TextureFormat.RGBA32, mipChain: false);
-            tex.LoadImage(_dataToUseOnReset);
-            var x = new GameObject("test").AddComponent<RawImage>();
-            x.texture = tex;
-            _resolution = new Vector2Int(_mainRenderTexture.width, _mainRenderTexture.height);
-            _dataToUseOnReset = null;
+            _resetResolution = false;
+            _mainRenderTexture.Resize(_resolution.x, _resolution.y);
+        }
+
+        if (_initTexture != null)
+        {
+            // Load data in new texture
+            // copy colors to existing texture (this takes care of converting betweent the different texture formats)
+            int importWidth = Mathf.Min(_initTexture.width, _resolution.x);
+            int importHeight = Mathf.Min(_initTexture.height, _resolution.y);
+            Color[] newPixels = _initTexture.GetPixels(0, 0, importWidth, importHeight);
+            _mainRenderTexture.SetPixels(0, 0, importWidth, importHeight, newPixels);
+
+            _initTexture = null;
             initColor = null;
+            IsEmptyEmpty = false;
         }
         else
         {
+            IsEmptyEmpty = true;
             initColor = new Color(255, 255, 255, 0);
-            _mainRenderTexture.Resize(_resolution.x, _resolution.y);
         }
 
         _previewRenderTexture.Resize(_resolution.x, _resolution.y);
         _mainRenderTexture.filterMode = _textureFiltering;
         _previewRenderTexture.filterMode = _textureFiltering;
 
-        // setup UPaint canvas
-        _canvas = new UPaintCanvas(_mainRenderTexture, _previewRenderTexture, _historicCapacity, initColor);
+        // setup UPaint layer
+        _layer = new UPaintLayer(_mainRenderTexture, _previewRenderTexture, _historicCapacity, initColor);
 
     }
 
     private void OnDestroy()
     {
-        _canvas?.Dispose();
+        _layer?.Dispose();
 
         Destroy(_mainRenderImage);
         Destroy(_previewRenderTexture);

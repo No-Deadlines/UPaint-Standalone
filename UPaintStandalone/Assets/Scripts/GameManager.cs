@@ -59,6 +59,7 @@ public class GameManager : MonoBehaviour
 
     private Vector2 _lastMousePosition;
     private BrushType _brushType;
+    private DirtyValue<Vector2Int> _upaintResolution;
 
     private void Awake()
     {
@@ -117,10 +118,23 @@ public class GameManager : MonoBehaviour
             HandleBrushPicking();
         }
 
+        UpdateDrawArea();
+
         _lastMousePosition = Input.mousePosition;
 
         _undoButton.interactable = _upaint.CanUndo();
         _redoButton.interactable = _upaint.CanRedo();
+    }
+
+    private void UpdateDrawArea()
+    {
+        _upaintResolution.Set(_upaint.Resolution);
+        if (_upaintResolution.ClearDirty())
+        {
+            _drawArea.sizeDelta = new Vector2(_upaintResolution.Get().x, _upaintResolution.Get().y);
+            _cameraManager.SetCameraSize(Mathf.Max(_drawArea.sizeDelta.x, _drawArea.sizeDelta.y) * 1.1f, 0);
+            _cameraManager.MoveTo(_upaint.transform.position);
+        }
     }
 
     private void HandleBrushPicking()
@@ -128,13 +142,16 @@ public class GameManager : MonoBehaviour
         if (Input.GetKey(KeyCode.LeftControl))
             return;
 
-        if (Input.GetKeyDown(KeyCode.Z))
+        if (Input.GetKeyDown(KeyCode.Z) || Input.GetKeyDown(KeyCode.Alpha1))
             SetBrushType(BrushType.Brush);
-        if (Input.GetKeyDown(KeyCode.X))
+        
+        if (Input.GetKeyDown(KeyCode.X) || Input.GetKeyDown(KeyCode.Alpha2))
             SetBrushType(BrushType.Eraser);
-        if (Input.GetKeyDown(KeyCode.C))
+        
+        if (Input.GetKeyDown(KeyCode.C) || Input.GetKeyDown(KeyCode.Alpha3))
             SetBrushType(BrushType.Fill);
-        if (Input.GetKeyDown(KeyCode.V))
+        
+        if (Input.GetKeyDown(KeyCode.V) || Input.GetKeyDown(KeyCode.Alpha4))
             SetBrushType(BrushType.Move);
     }
 
@@ -206,9 +223,6 @@ public class GameManager : MonoBehaviour
             return;
 
         _upaint.Initialize(new Vector2Int(x, y), FilterMode.Point, 50);
-        _drawArea.sizeDelta = new Vector2(x, y);
-        _cameraManager.SetCameraSize(Mathf.Max(_drawArea.sizeDelta.x, _drawArea.sizeDelta.y) * 1.1f, 0);
-        _cameraManager.MoveTo(_upaint.transform.position);
     }
 
     private void PickSaveLocation()
@@ -259,7 +273,10 @@ public class GameManager : MonoBehaviour
 
         byte[] bytes = File.ReadAllBytes(selectedFiles[0]);
 
-        _upaint.ImportFromImage(bytes);
+        Texture2D texture = new Texture2D(1, 1);
+        texture.LoadImage(bytes);
+        
+        _upaint.ImportImage(texture);
     }
 
     private string GetExportPath()
