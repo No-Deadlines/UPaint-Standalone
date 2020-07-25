@@ -1,5 +1,6 @@
 ﻿using SFB;
 using System;
+using System.Collections;
 using System.Diagnostics;
 using System.IO;
 using TMPro;
@@ -56,6 +57,7 @@ public class GameManager : MonoBehaviour
     [SerializeField] private GameObject _colorToolbarContainer = null;
     [SerializeField] private GameObject _brushSizeToolbarContainer = null;
     [SerializeField] private GameObject _brushGradientToolbarContainer = null;
+    [SerializeField] private Button _dropperButton = null;
 
     private Vector2 _lastMousePosition;
     private BrushType _brushType;
@@ -91,6 +93,8 @@ public class GameManager : MonoBehaviour
         _colorPickerConfirmButton.onClick.AddListener(() => { _colorPicker.gameObject.SetActive(false); SetColor(_colorPicker.CurrentColor); });
         _colorPickerConfirm2Button.onClick.AddListener(() => { _colorPicker.gameObject.SetActive(false); SetColor(_colorPicker.CurrentColor); });
 
+        _dropperButton.onClick.AddListener(() => _upaint.StartColorPicking());
+
         SetBrushType(BrushType.Brush);
 
         LoadPlayerPrefs();
@@ -120,6 +124,8 @@ public class GameManager : MonoBehaviour
 
         UpdateDrawArea();
 
+        _colorPickerImage.color = _upaint.PaintColor;
+
         _lastMousePosition = Input.mousePosition;
 
         _undoButton.interactable = _upaint.CanUndo();
@@ -144,13 +150,13 @@ public class GameManager : MonoBehaviour
 
         if (Input.GetKeyDown(KeyCode.Z) || Input.GetKeyDown(KeyCode.Alpha1))
             SetBrushType(BrushType.Brush);
-        
+
         if (Input.GetKeyDown(KeyCode.X) || Input.GetKeyDown(KeyCode.Alpha2))
             SetBrushType(BrushType.Eraser);
-        
+
         if (Input.GetKeyDown(KeyCode.C) || Input.GetKeyDown(KeyCode.Alpha3))
             SetBrushType(BrushType.Fill);
-        
+
         if (Input.GetKeyDown(KeyCode.V) || Input.GetKeyDown(KeyCode.Alpha4))
             SetBrushType(BrushType.Move);
     }
@@ -275,8 +281,10 @@ public class GameManager : MonoBehaviour
 
         Texture2D texture = new Texture2D(1, 1);
         texture.LoadImage(bytes);
-        
+
         _upaint.ImportImage(texture);
+
+        Destroy(texture);
     }
 
     private string GetExportPath()
@@ -350,7 +358,6 @@ public class GameManager : MonoBehaviour
 
     private void SetColor(Color color)
     {
-        _colorPickerImage.color = color;
         _upaint.PaintColor = color;
     }
 

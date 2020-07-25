@@ -42,7 +42,11 @@ public class BrushCursor : MonoBehaviour
 
     private void UpdateData()
     {
-        if (_upaint.CurrentBrush != null)
+        if (_upaint.IsPickingColor)
+        {
+            _imageEnabled = false;
+        }
+        else if (_upaint.CurrentBrush != null)
         {
             if (_upaint.CurrentBrush is CCC.UPaint.FreeLineBrush freelineBrush)
             {

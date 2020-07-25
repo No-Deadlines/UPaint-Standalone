@@ -7,6 +7,8 @@ using System.IO;
 using UnityEngine.EventSystems;
 using System.Linq;
 using System.Collections.Generic;
+using System.Collections;
+using System;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -25,13 +27,14 @@ public class UPaintGUI : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
 
     private bool _brushWasSet;
     private bool _pointerIn;
-    private bool _brushPressed;
+    private DirtyValue<bool> _brushPressed;
     private List<UPaintLayerGUI> _layers = new List<UPaintLayerGUI>();
 
     private UPaintLayerGUI CurrentLayer => CurrentLayerIndex >= 0 && CurrentLayerIndex < _layers.Count ? _layers[CurrentLayerIndex] : null;
 
     public Vector2Int Resolution => _resolution;
     public IUPaintBrush CurrentBrush { get; private set; }
+    public bool IsPickingColor => _isColorPicking.Get();
     public Color PaintColor { get => _paintColor; set => _paintColor = value; }
     public FilterMode TextureFiltering => _textureFiltering;
     public int HistoryCapacity => _historicCapacity;
@@ -238,7 +241,7 @@ public class UPaintGUI : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
 
     public void ImportImage(Texture2D texture)
     {
-        if(_layers.Count == 1 && _layers[0].IsEmptyEmpty)
+        if (_layers.Count == 1 && _layers[0].IsEmptyEmpty)
         {
             Initialize(new Vector2Int(texture.width, texture.height), _textureFiltering, _historicCapacity);
         }
@@ -259,6 +262,36 @@ public class UPaintGUI : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
         _layers[layerIndex].Initialize(texture, _textureFiltering, _historicCapacity);
     }
 
+    public void StartColorPicking() => StartColorPicking(Camera.main);
+
+    public void StartColorPicking(Camera camera)
+    {
+        if (_isColorPicking.Get())
+            return;
+
+        _colorPickCamera = camera ?? throw new System.ArgumentNullException(nameof(camera));
+        _beforeColorPickColor = PaintColor;
+        _isColorPicking.Set(true);
+        _brushPressed.Set(false);
+    }
+
+    public void CancelColorPicking()
+    {
+        if (!_isColorPicking.Get())
+            return;
+
+        _isColorPicking.Set(false);
+        PaintColor = _beforeColorPickColor;
+    }
+
+    private void CompleteColorPicking()
+    {
+        if (!_isColorPicking.Get())
+            return;
+
+        _isColorPicking.Set(false);
+    }
+
     private void Awake()
     {
         if (!_brushWasSet)
@@ -272,41 +305,91 @@ public class UPaintGUI : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
             CurrentLayer.ApplyChangesIfPossible();
         }
 
-        if (CurrentBrush != null && _pointerIn)
+        UpdateBrushPressedState();
+        HandleBrushPress();
+
+        HandleColorPicking();
+
+        if (_isColorPicking.ClearDirty())
+        {
+            if (_isColorPicking.Get())
+            {
+                _colorPickCoroutine = StartCoroutine(UpdateColorPicking());
+            }
+            else if (_colorPickCoroutine != null)
+            {
+                StopCoroutine(_colorPickCoroutine);
+                _colorPickCoroutine = null;
+            }
+        }
+    }
+
+    private void HandleColorPicking()
+    {
+        if (_isColorPicking.Get())
+        {
+            if (Input.GetMouseButtonDown(0))
+            {
+                CompleteColorPicking();
+            }
+            else if (Input.GetMouseButtonDown(1) || Input.GetKeyDown(KeyCode.Escape))
+            {
+                CancelColorPicking();
+            }
+        }
+    }
+
+    private void UpdateBrushPressedState()
+    {
+        if (CurrentBrush != null && _pointerIn && !_isColorPicking.Get())
         {
             if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1))
             {
+                _brushPressed.Set(true);
+            }
+        }
+
+        // pointer up
+        if (Input.GetMouseButtonUp(0) || Input.GetMouseButtonUp(1))
+        {
+            _brushPressed.Set(false);
+        }
+    }
+
+    private void HandleBrushPress()
+    {
+        if (_brushPressed.ClearDirty()) // on change
+        {
+            if (_brushPressed.Get())
+            {
+                // pointer down
                 if (CurrentLayer != null)
                 {
                     float2 pixelCoordinate = DisplayPositionToLayerCoordinate(Input.mousePosition);
                     CurrentLayer.PressBursh(CurrentBrush, pixelCoordinate, PaintColor, Input.GetMouseButtonDown(0) ? MouseButton.Left : MouseButton.Right);
                 }
-                _brushPressed = true;
             }
-        }
-
-        if (_brushPressed)
-        {
-            // pointer hold
-            if (Input.GetMouseButton(0) || Input.GetMouseButton(1))
+            else
             {
-                if (CurrentLayer != null)
-                {
-                    float2 pixelCoordinate = DisplayPositionToLayerCoordinate(Input.mousePosition);
-                    CurrentLayer.HoldBursh(CurrentBrush, pixelCoordinate, PaintColor, Input.GetMouseButton(0) ? MouseButton.Left : MouseButton.Right);
-                }
-            }
-
-            // pointer up
-            if (Input.GetMouseButtonUp(0) || Input.GetMouseButtonUp(1))
-            {
+                // pointer up
                 if (CurrentLayer != null)
                 {
                     float2 pixelCoordinate = DisplayPositionToLayerCoordinate(Input.mousePosition);
 
                     CurrentLayer.ReleaseBursh(CurrentBrush, pixelCoordinate, PaintColor, Input.GetMouseButtonUp(0) ? MouseButton.Left : MouseButton.Right);
                 }
-                _brushPressed = false;
+            }
+        }
+        else
+        {
+            // pointer hold
+            if (_brushPressed.Get())
+            {
+                if (CurrentLayer != null)
+                {
+                    float2 pixelCoordinate = DisplayPositionToLayerCoordinate(Input.mousePosition);
+                    CurrentLayer.HoldBursh(CurrentBrush, pixelCoordinate, PaintColor, Input.GetMouseButton(0) ? MouseButton.Left : MouseButton.Right);
+                }
             }
         }
     }
@@ -360,6 +443,35 @@ public class UPaintGUI : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
     public void OnPointerUp(PointerEventData eventData)
     {
         _pointerIn = false;
+    }
+
+    private WaitForEndOfFrame _frameEnd = new WaitForEndOfFrame();
+    private Texture2D _colorPickTexture;
+    private Coroutine _colorPickCoroutine;
+    private Camera _colorPickCamera;
+    private Color _beforeColorPickColor;
+    private DirtyValue<bool> _isColorPicking;
+
+    public IEnumerator UpdateColorPicking()
+    {
+        while (true)
+        {
+            yield return _frameEnd;
+
+            if (_colorPickTexture == null)
+                _colorPickTexture = new Texture2D(1, 1, TextureFormat.RGB24, false);
+
+            Rect viewRect = _colorPickCamera.pixelRect;
+
+            Rect pickRect = new Rect(Input.mousePosition, Vector2.one);
+            pickRect.x = Mathf.Clamp(pickRect.x, viewRect.xMin, viewRect.xMax - 1);
+            pickRect.y = Mathf.Clamp(pickRect.y, viewRect.yMin, viewRect.yMax - 1);
+
+            _colorPickTexture.ReadPixels(pickRect, 0, 0, false);
+            _colorPickTexture.Apply(false);
+
+            PaintColor = _colorPickTexture.GetPixel(0, 0);
+        }
     }
 }
 

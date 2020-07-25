@@ -16,7 +16,7 @@ public class ColorSlider : MonoBehaviour
 
     private Slider slider;
 
-    private bool listen = true;
+    private bool fireEvent = true;
 
     private void Awake()
     {
@@ -36,7 +36,7 @@ public class ColorSlider : MonoBehaviour
 
     private void ColorChanged(Color newColor)
     {
-        listen = false;
+        fireEvent = false;
         switch (type)
         {
             case ColorValues.R:
@@ -54,11 +54,12 @@ public class ColorSlider : MonoBehaviour
             default:
                 break;
         }
+        fireEvent = true;
     }
 
     private void HSVChanged(float hue, float saturation, float value)
     {
-        listen = false;
+        fireEvent = false;
         switch (type)
         {
             case ColorValues.Hue:
@@ -73,18 +74,14 @@ public class ColorSlider : MonoBehaviour
             default:
                 break;
         }
+        fireEvent = true;
     }
 
     private void SliderChanged(float newValue)
     {
-        if (listen)
+        if (fireEvent)
         {
-            newValue = slider.normalizedValue;
-            //if (type == ColorValues.Hue)
-            //    newValue = 1 - newValue;
-
-            hsvpicker.AssignColor(type, newValue);
+            hsvpicker.AssignColor(type, slider.normalizedValue);
         }
-        listen = true;
     }
 }
