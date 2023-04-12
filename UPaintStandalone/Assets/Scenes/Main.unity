@@ -829,10 +829,6 @@ PrefabInstance:
       propertyPath: m_AnchoredPosition.y
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: 0}
-      propertyPath: m_IgnoreLayout
-      value: 0
-      objectReference: {fileID: 0}
     - target: {fileID: 2651586889916750178, guid: 8fd2022fcd164234b9a5e9a19f2cbc1a,
         type: 3}
       propertyPath: m_AnchorMax.y
